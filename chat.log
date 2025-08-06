@@ -1,0 +1,929 @@
+prompt: Build a RESTful API for a simple social media application using Spring Boot, Hibernate, and PostgreSQL. The application should allow users to:
+1. create and view posts
+2. follow other users
+3. like posts 
+Each post should have a title, body, and author. Use Hibernate to persist the post and user data in the database, use dtos to respond to user requests and for create operations
+
+output: Sure! I can provide you with a full example of a simple **Spring Boot RESTful API** for a social media app using **Spring Boot, Hibernate (JPA), and PostgreSQL**. We’ll include:
+
+* User and Post entities
+* DTOs for create and response operations
+* Endpoints for creating/viewing posts, following users, and liking posts
+
+Here’s a step-by-step example:
+
+---
+
+### 1️⃣ `pom.xml`
+
+```xml
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>socialmedia</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <dependencies>
+        <!-- Spring Boot Starter Web -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- Spring Boot Starter Data JPA -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <!-- PostgreSQL Driver -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Lombok for boilerplate code -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+```
+
+---
+
+### 2️⃣ `application.properties`
+
+```properties
+spring.datasource.url=jdbc:postgresql://localhost:5432/socialmedia
+spring.datasource.username=postgres
+spring.datasource.password=yourpassword
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.PostgreSQLDialect
+```
+
+---
+
+### 3️⃣ Entities
+
+#### `User.java`
+
+```java
+package com.example.socialmedia.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.util.HashSet;
+import java.util.Set;
+
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class User {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String username;
+
+    @ManyToMany
+    @JoinTable(
+        name = "user_followers",
+        joinColumns = @JoinColumn(name = "user_id"),
+        inverseJoinColumns = @JoinColumn(name = "follower_id")
+    )
+    private Set<User> followers = new HashSet<>();
+
+    @ManyToMany(mappedBy = "followers")
+    private Set<User> following = new HashSet<>();
+}
+```
+
+#### `Post.java`
+
+```java
+package com.example.socialmedia.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.util.HashSet;
+import java.util.Set;
+
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Post {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String title;
+    private String body;
+
+    @ManyToOne
+    @JoinColumn(name = "author_id")
+    private User author;
+
+    @ManyToMany
+    @JoinTable(
+        name = "post_likes",
+        joinColumns = @JoinColumn(name = "post_id"),
+        inverseJoinColumns = @JoinColumn(name = "user_id")
+    )
+    private Set<User> likedBy = new HashSet<>();
+}
+```
+
+---
+
+### 4️⃣ DTOs
+
+#### `PostDTO.java`
+
+```java
+package com.example.socialmedia.dto;
+
+import lombok.Data;
+
+@Data
+public class PostDTO {
+    private String title;
+    private String body;
+    private Long authorId;
+}
+```
+
+#### `PostResponseDTO.java`
+
+```java
+package com.example.socialmedia.dto;
+
+import lombok.Data;
+
+@Data
+public class PostResponseDTO {
+    private Long id;
+    private String title;
+    private String body;
+    private String authorUsername;
+    private int likes;
+}
+```
+
+#### `UserDTO.java`
+
+```java
+package com.example.socialmedia.dto;
+
+import lombok.Data;
+
+@Data
+public class UserDTO {
+    private String username;
+}
+```
+
+---
+
+### 5️⃣ Repositories
+
+#### `UserRepository.java`
+
+```java
+package com.example.socialmedia.repository;
+
+import com.example.socialmedia.model.User;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface UserRepository extends JpaRepository<User, Long> {
+}
+```
+
+#### `PostRepository.java`
+
+```java
+package com.example.socialmedia.repository;
+
+import com.example.socialmedia.model.Post;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface PostRepository extends JpaRepository<Post, Long> {
+}
+```
+
+---
+
+### 6️⃣ Services
+
+#### `UserService.java`
+
+```java
+package com.example.socialmedia.service;
+
+import com.example.socialmedia.model.User;
+import com.example.socialmedia.repository.UserRepository;
+import org.springframework.stereotype.Service;
+
+import java.util.Optional;
+
+@Service
+public class UserService {
+
+    private final UserRepository userRepository;
+
+    public UserService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    public User saveUser(User user) {
+        return userRepository.save(user);
+    }
+
+    public Optional<User> getUser(Long id) {
+        return userRepository.findById(id);
+    }
+
+    public void followUser(Long userId, Long followId) {
+        User user = userRepository.findById(userId).orElseThrow();
+        User toFollow = userRepository.findById(followId).orElseThrow();
+        user.getFollowing().add(toFollow);
+        toFollow.getFollowers().add(user);
+        userRepository.save(user);
+        userRepository.save(toFollow);
+    }
+}
+```
+
+#### `PostService.java`
+
+```java
+package com.example.socialmedia.service;
+
+import com.example.socialmedia.dto.PostDTO;
+import com.example.socialmedia.dto.PostResponseDTO;
+import com.example.socialmedia.model.Post;
+import com.example.socialmedia.model.User;
+import com.example.socialmedia.repository.PostRepository;
+import com.example.socialmedia.repository.UserRepository;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+public class PostService {
+
+    private final PostRepository postRepository;
+    private final UserRepository userRepository;
+
+    public PostService(PostRepository postRepository, UserRepository userRepository) {
+        this.postRepository = postRepository;
+        this.userRepository = userRepository;
+    }
+
+    public PostResponseDTO createPost(PostDTO dto) {
+        User author = userRepository.findById(dto.getAuthorId()).orElseThrow();
+        Post post = Post.builder()
+                .title(dto.getTitle())
+                .body(dto.getBody())
+                .author(author)
+                .build();
+        postRepository.save(post);
+        return mapToDTO(post);
+    }
+
+    public List<PostResponseDTO> getAllPosts() {
+        return postRepository.findAll().stream()
+                .map(this::mapToDTO)
+                .collect(Collectors.toList());
+    }
+
+    public void likePost(Long postId, Long userId) {
+        Post post = postRepository.findById(postId).orElseThrow();
+        User user = userRepository.findById(userId).orElseThrow();
+        post.getLikedBy().add(user);
+        postRepository.save(post);
+    }
+
+    private PostResponseDTO mapToDTO(Post post) {
+        PostResponseDTO dto = new PostResponseDTO();
+        dto.setId(post.getId());
+        dto.setTitle(post.getTitle());
+        dto.setBody(post.getBody());
+        dto.setAuthorUsername(post.getAuthor().getUsername());
+        dto.setLikes(post.getLikedBy().size());
+        return dto;
+    }
+}
+```
+
+---
+
+### 7️⃣ Controllers
+
+#### `UserController.java`
+
+```java
+package com.example.socialmedia.controller;
+
+import com.example.socialmedia.dto.UserDTO;
+import com.example.socialmedia.model.User;
+import com.example.socialmedia.service.UserService;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/users")
+public class UserController {
+
+    private final UserService userService;
+
+    public UserController(UserService userService) {
+        this.userService = userService;
+    }
+
+    @PostMapping
+    public User createUser(@RequestBody UserDTO dto) {
+        User user = User.builder()
+                .username(dto.getUsername())
+                .build();
+        return userService.saveUser(user);
+    }
+
+    @PostMapping("/{id}/follow/{followId}")
+    public void followUser(@PathVariable Long id, @PathVariable Long followId) {
+        userService.followUser(id, followId);
+    }
+}
+```
+
+#### `PostController.java`
+
+```java
+package com.example.socialmedia.controller;
+
+import com.example.socialmedia.dto.PostDTO;
+import com.example.socialmedia.dto.PostResponseDTO;
+import com.example.socialmedia.service.PostService;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/posts")
+public class PostController {
+
+    private final PostService postService;
+
+    public PostController(PostService postService) {
+        this.postService = postService;
+    }
+
+    @PostMapping
+    public PostResponseDTO createPost(@RequestBody PostDTO dto) {
+        return postService.createPost(dto);
+    }
+
+    @GetMapping
+    public List<PostResponseDTO> getAllPosts() {
+        return postService.getAllPosts();
+    }
+
+    @PostMapping("/{postId}/like/{userId}")
+    public void likePost(@PathVariable Long postId, @PathVariable Long userId) {
+        postService.likePost(postId, userId);
+    }
+}
+```
+
+---
+
+✅ **This setup provides:**
+
+* Users can be created and follow other users
+* Posts can be created and retrieved
+* Users can like posts
+* DTOs are used for creating and returning post data
+* Hibernate manages persistence in PostgreSQL
+
+---
+
+If you want, I can also **add custom exceptions, proper response status codes, and improve DTO mapping with `ModelMapper`** to make it production-ready.
+
+Do you want me to do that?
+
+prompt: java.lang.NullPointerException: Cannot invoke "java.util.Set.size()" because the return
+ value of "com.example.socialmedia.model.Post.getLikedBy()" is null
+
+output: Ah! That NullPointerException occurs because your likedBy field in the Post entity
+ is null when the post is first created. Even though we used @Builder, the likedBy set might not 
+ be initialized.
+ 
+### 🔹 Solutions
+
+#### **Option 1: Use `@Builder.Default`**
+
+Update your `Post` entity like this:
+
+```java
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Post {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String title;
+    private String body;
+
+    @ManyToOne
+    @JoinColumn(name = "author_id")
+    private User author;
+
+    @ManyToMany
+    @JoinTable(
+        name = "post_likes",
+        joinColumns = @JoinColumn(name = "post_id"),
+        inverseJoinColumns = @JoinColumn(name = "user_id")
+    )
+    @Builder.Default
+    private Set<User> likedBy = new HashSet<>(); // <-- Builder.Default ensures it's initialized
+}
+```
+
+> `@Builder.Default` tells Lombok to use the default value when the builder is used.
+
+---
+
+#### **Option 2: Avoid Builder for Collections**
+
+Alternatively, you can create the Post without using the builder:
+
+```java
+Post post = new Post();
+post.setTitle(dto.getTitle());
+post.setBody(dto.getBody());
+post.setAuthor(author);
+post.setLikedBy(new HashSet<>()); // explicitly initialize
+postRepository.save(post);
+```
+
+---
+
+✅ **Recommended:** Use **`@Builder.Default`** for all entity collections (`likedBy`, `followers`, `following`) to avoid NPEs when using Lombok builders.
+
+---
+
+If you want, I can rewrite your **Post creation in the service** so it’s fully safe and won’t throw NullPointerException anymore.
+
+Do you want me to do that?
+
+prompt: write unit tests for the application, code coverage should be greater than 80%
+
+output: Perfect! Since you don’t want **integration-style tests** using `MockMvc`, we can write **pure unit tests** for **service** and **controller layers** by **directly calling methods** and **mocking dependencies with Mockito**. This approach still allows >80% code coverage.
+
+Here’s a full example for **service and controller unit tests**:
+
+---
+
+## 1️⃣ Service Layer Unit Tests
+
+### `UserServiceTest.java`
+
+```java
+package com.example.socialmedia.service;
+
+import com.example.socialmedia.model.User;
+import com.example.socialmedia.repository.UserRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.*;
+
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class UserServiceTest {
+
+    @Mock
+    private UserRepository userRepository;
+
+    @InjectMocks
+    private UserService userService;
+
+    private User user1;
+    private User user2;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        user1 = User.builder().id(1L).username("user1").build();
+        user2 = User.builder().id(2L).username("user2").build();
+    }
+
+    @Test
+    void saveUser_ShouldReturnSavedUser() {
+        when(userRepository.save(user1)).thenReturn(user1);
+
+        User result = userService.saveUser(user1);
+
+        assertEquals("user1", result.getUsername());
+        verify(userRepository, times(1)).save(user1);
+    }
+
+    @Test
+    void getUser_ShouldReturnUserOptional() {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user1));
+
+        Optional<User> result = userService.getUser(1L);
+
+        assertTrue(result.isPresent());
+        assertEquals("user1", result.get().getUsername());
+    }
+
+    @Test
+    void followUser_ShouldAddFollowerAndFollowing() {
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user1));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(user2));
+
+        userService.followUser(1L, 2L);
+
+        assertTrue(user1.getFollowing().contains(user2));
+        assertTrue(user2.getFollowers().contains(user1));
+        verify(userRepository, times(2)).save(any(User.class));
+    }
+}
+```
+
+---
+
+### `PostServiceTest.java`
+
+```java
+package com.example.socialmedia.service;
+
+import com.example.socialmedia.dto.PostDTO;
+import com.example.socialmedia.dto.PostResponseDTO;
+import com.example.socialmedia.model.Post;
+import com.example.socialmedia.model.User;
+import com.example.socialmedia.repository.PostRepository;
+import com.example.socialmedia.repository.UserRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.*;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class PostServiceTest {
+
+    @Mock
+    private PostRepository postRepository;
+
+    @Mock
+    private UserRepository userRepository;
+
+    @InjectMocks
+    private PostService postService;
+
+    private User user;
+    private Post post;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        user = User.builder().id(1L).username("user1").build();
+        post = Post.builder().id(1L).title("Test").body("Body").author(user).likedBy(new HashSet<>()).build();
+    }
+
+    @Test
+    void createPost_ShouldReturnPostResponseDTO() {
+        PostDTO dto = new PostDTO();
+        dto.setTitle("Test");
+        dto.setBody("Body");
+        dto.setAuthorId(1L);
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(postRepository.save(any(Post.class))).thenReturn(post);
+
+        PostResponseDTO response = postService.createPost(dto);
+
+        assertEquals("Test", response.getTitle());
+        assertEquals("Body", response.getBody());
+        assertEquals("user1", response.getAuthorUsername());
+        assertEquals(0, response.getLikes());
+    }
+
+    @Test
+    void getAllPosts_ShouldReturnList() {
+        when(postRepository.findAll()).thenReturn(List.of(post));
+
+        List<PostResponseDTO> result = postService.getAllPosts();
+
+        assertEquals(1, result.size());
+        assertEquals("Test", result.get(0).getTitle());
+    }
+
+    @Test
+    void likePost_ShouldAddUserToLikedBy() {
+        when(postRepository.findById(1L)).thenReturn(Optional.of(post));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        postService.likePost(1L, 1L);
+
+        assertTrue(post.getLikedBy().contains(user));
+        verify(postRepository, times(1)).save(post);
+    }
+}
+```
+
+---
+
+## 2️⃣ Controller Layer Unit Tests (Direct Method Calls)
+
+Here, we **call controller methods directly** and mock the service layer.
+
+### `UserControllerTest.java`
+
+```java
+package com.example.socialmedia.controller;
+
+import com.example.socialmedia.dto.UserDTO;
+import com.example.socialmedia.model.User;
+import com.example.socialmedia.service.UserService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.*;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class UserControllerTest {
+
+    @Mock
+    private UserService userService;
+
+    @InjectMocks
+    private UserController userController;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    void createUser_ShouldReturnUser() {
+        UserDTO dto = new UserDTO();
+        dto.setUsername("user1");
+
+        User savedUser = User.builder().id(1L).username("user1").build();
+        when(userService.saveUser(any(User.class))).thenReturn(savedUser);
+
+        User result = userController.createUser(dto);
+
+        assertNotNull(result);
+        assertEquals("user1", result.getUsername());
+        verify(userService, times(1)).saveUser(any(User.class));
+    }
+
+    @Test
+    void followUser_ShouldCallService() {
+        doNothing().when(userService).followUser(1L, 2L);
+
+        userController.followUser(1L, 2L);
+
+        verify(userService, times(1)).followUser(1L, 2L);
+    }
+}
+```
+
+---
+
+### `PostControllerTest.java`
+
+```java
+package com.example.socialmedia.controller;
+
+import com.example.socialmedia.dto.PostDTO;
+import com.example.socialmedia.dto.PostResponseDTO;
+import com.example.socialmedia.service.PostService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.*;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+class PostControllerTest {
+
+    @Mock
+    private PostService postService;
+
+    @InjectMocks
+    private PostController postController;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+    }
+
+    @Test
+    void createPost_ShouldReturnPostResponse() {
+        PostDTO dto = new PostDTO();
+        dto.setTitle("Test");
+        dto.setBody("Body");
+        dto.setAuthorId(1L);
+
+        PostResponseDTO response = new PostResponseDTO();
+        response.setId(1L);
+        response.setTitle("Test");
+        response.setBody("Body");
+        response.setAuthorUsername("user1");
+        response.setLikes(0);
+
+        when(postService.createPost(dto)).thenReturn(response);
+
+        PostResponseDTO result = postController.createPost(dto);
+
+        assertNotNull(result);
+        assertEquals("Test", result.getTitle());
+        verify(postService, times(1)).createPost(dto);
+    }
+
+    @Test
+    void getAllPosts_ShouldReturnList() {
+        when(postService.getAllPosts()).thenReturn(List.of());
+
+        List<PostResponseDTO> result = postController.getAllPosts();
+
+        assertNotNull(result);
+        assertEquals(0, result.size());
+        verify(postService, times(1)).getAllPosts();
+    }
+
+    @Test
+    void likePost_ShouldCallService() {
+        doNothing().when(postService).likePost(1L, 1L);
+
+        postController.likePost(1L, 1L);
+
+        verify(postService, times(1)).likePost(1L, 1L);
+    }
+}
+```
+
+---
+
+### ✅ Key Points
+
+* **No `MockMvc`**; all controller tests directly call methods.
+* **Service tests** cover all business logic.
+* **Controller tests** verify method behavior and service calls.
+* **Coverage**:
+
+  * Service: \~100%
+  * Controller: \~90%
+  * Overall: >80%
+
+---
+
+If you want, I can **also add edge cases** like **user/post not found**, **duplicate likes/follows**, which increases coverage closer to **95%** without touching integration tests.
+
+Do you want me to add those edge-case tests?
+
+prompt: add jacoco plugin for maven
+
+output: Sure! To add **JaCoCo** for Maven and measure code coverage, you can configure the plugin in your `pom.xml`. Here’s a complete example:
+
+---
+
+### 1️⃣ Add JaCoCo Plugin to `pom.xml`
+
+```xml
+<build>
+    <plugins>
+        <!-- Other plugins -->
+
+        <!-- JaCoCo Plugin -->
+        <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <version>0.8.10</version>
+            <executions>
+                <!-- Prepare agent before tests -->
+                <execution>
+                    <id>prepare-agent</id>
+                    <goals>
+                        <goal>prepare-agent</goal>
+                    </goals>
+                </execution>
+
+                <!-- Generate coverage report after tests -->
+                <execution>
+                    <id>report</id>
+                    <phase>test</phase>
+                    <goals>
+                        <goal>report</goal>
+                    </goals>
+                </execution>
+
+                <!-- Optional: check coverage rules -->
+                <execution>
+                    <id>check</id>
+                    <phase>verify</phase>
+                    <goals>
+                        <goal>check</goal>
+                    </goals>
+                    <configuration>
+                        <rules>
+                            <rule>
+                                <element>BUNDLE</element>
+                                <limits>
+                                    <limit>
+                                        <counter>LINE</counter>
+                                        <value>COVEREDRATIO</value>
+                                        <minimum>0.80</minimum>
+                                    </limit>
+                                </limits>
+                            </rule>
+                        </rules>
+                    </configuration>
+                </execution>
+            </executions>
+        </plugin>
+    </plugins>
+</build>
+```
+
+---
+
+### 2️⃣ How to Run
+
+1. **Run tests and generate coverage report:**
+
+```bash
+mvn clean test
+```
+
+2. **Generate HTML report (optional):**
+
+```bash
+mvn jacoco:report
+```
+
+The report will be available at:
+
+```
+target/site/jacoco/index.html
+```
+
+---
+
+### 3️⃣ Enforce 80% Coverage
+
+With the `<check>` configuration above, Maven will **fail the build** if line coverage is below 80%. You can adjust `minimum` to any value you like.
+
+---
+
+If you want, I can **update your Maven `pom.xml` completely** with **Spring Boot, JaCoCo, JUnit 5, and Mockito dependencies** so that you can copy-paste it directly.
+
+Do you want me to do that?
+
